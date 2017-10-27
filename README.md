@@ -6,6 +6,6 @@ Fork a vRO package
 ### Dependencies:   
 
 - Tested with ruby 2.3
-- Gems
+- Gems:
   - nokogiri
 
