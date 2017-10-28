@@ -4,8 +4,11 @@ require 'tmpdir'
 
 module VRO
 
+  # Represents a vRO package element
   class Element
     attr_reader :name
+    attr_reader :type
+
     def initialize(path)
       @name = File.basename(path)
       @dirname = File.dirname(path)
@@ -19,6 +22,34 @@ module VRO
 
     def relocatable?
       ['Workflow','Action'].include? @type
+    end
+
+    # Given a map: stale references -> new references
+    #  update linked-workflow-id's in data
+    def update_references(stale_refs)
+      doc = nil
+      # Read data file as xml
+      File.open("%s/data" % path) do |data|
+        doc = Nokogiri::XML(data.read)
+      end
+
+      # Find and replace link references
+      element_links = doc.xpath("//xmlns:workflow-item[@type='link']")
+      element_links.each do |link|
+        ref_id = link["linked-workflow-id"]
+        if stale_refs.include? ref_id
+          link["linked-workflow-id"] = stale_refs[ref_id]
+          print "Mapped %s to %s\n" % [ref_id, stale_refs[ref_id]]
+        else
+          print "Oddity: Unknown linked-workflow-id: %s\n" % ref_id
+        end
+      end
+
+      # Update/overwrite data file
+      outf = File.open("%s/data" % path, 'w')
+      outf.write(doc.to_xml)
+      outf.close
+      print "Updated References for element: %s\n" % [name]
     end
 
     # Relocate the path location of this element in vRO
@@ -76,6 +107,7 @@ module VRO
 
   end
 
+  # Represents a vRO package
   class Package
 
     attr_accessor :name
@@ -112,6 +144,12 @@ module VRO
       print "Forked package to %s.package\n" % @name
     end
 
+    def update_references(stale_refs)
+      @elements.select{|e| e.type == "Workflow"}.each do |wf|
+        wf.update_references(stale_refs)
+      end
+    end
+
     def fork(name, category_name)
       # Instead of creating a new package
       # try modifying this one.
@@ -128,6 +166,9 @@ module VRO
           el.relocate(category_name)
         end
       end
+
+      # Remap workflow references
+      update_references(stale_refs)
 
       # Rename this package
       @name = name
