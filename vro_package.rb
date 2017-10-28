@@ -20,8 +20,9 @@ module VRO
       "%s/%s" % [@dirname,@name]
     end
 
+    # Only relocate these element types
     def relocatable?
-      ['Workflow','Action'].include? @type
+      ['Workflow','ScriptModule'].include? @type
     end
 
     # Given a map: stale references -> new references
@@ -52,19 +53,28 @@ module VRO
       print "Updated References for element: %s\n" % [name]
     end
 
-    # Relocate the path location of this element in vRO
-    def relocate(category)
-      doc = nil
-      File.open("%s/categories" % path) do |cats|
-        doc = Nokogiri::XML(cats.read)
+    def relocate_scriptmodule(category,doc)
+      el_cat = doc.xpath("//category")
+      if el_cat.size != 1
+        print "Error: Found %d category elements in %s\n" % [el_cat.size,name]
+        return
       end
+      el_cat = el_cat[0]
+      ns = el_cat["name"]
+      new_ns = "%s.%s" % [category,ns]
+      el_cat["name"] = new_ns
+      el_name = el_cat.child
+      el_cdat = Nokogiri::XML::CDATA.new(doc, new_ns)
+      el_name.children = el_cdat
+    end
 
+    def relocate_workflow(category, doc)
       el_cats = doc.xpath("//categories")[0]
 
-      el_cat = Nokogiri::XML::Node.new "category", doc
+      el_cat = Nokogiri::XML::Node.new("category", doc)
       el_cat["name"] = category
-      el_name = Nokogiri::XML::Node.new "name", doc
-      el_cdat = Nokogiri::XML::CDATA.new doc, category
+      el_name = Nokogiri::XML::Node.new("name", doc)
+      el_cdat = Nokogiri::XML::CDATA.new(doc, category)
       el_name.add_child el_cdat
       el_cat.add_child el_name
 
@@ -75,13 +85,28 @@ module VRO
       else
         el_cats.add_child(el_cat)
       end
+    end
+
+    # Relocate the path location of this element in vRO
+    def relocate(category)
+      doc = nil
+      File.open("%s/categories" % path) do |cats|
+        doc = Nokogiri::XML(cats.read)
+      end
+
+      if type == 'Workflow'
+        relocate_workflow(category,doc)
+      end
+      if type == 'ScriptModule'
+        relocate_scriptmodule(category,doc)
+      end
 
       outf = File.open("%s/categories" % path, 'w')
       noformat_nodecl = Nokogiri::XML::Node::SaveOptions::NO_DECLARATION
 
       outf.write(doc.to_xml(save_with:noformat_nodecl))
       outf.close
-      print "Relocated %s to %s\n" % [name, category]
+      print "Relocated %s %s to %s\n" % [type, name, category]
     end
 
     def rename(name)
@@ -92,6 +117,11 @@ module VRO
       # Get the type
       element_type = doc.xpath("//entry[@key='type']")[0].content
       @type = element_type
+
+      unless relocatable?
+        print "Skipping element %s of type %s\n" % []
+        return
+      end
 
       doc.xpath("//entry[@key='id']")[0].content=name
 
@@ -157,13 +187,15 @@ module VRO
       @elements.each do |el|
         guid = SecureRandom.uuid
 
-        # Store old refs and new name
-        stale_refs[el.name] = guid
+        # Only relocatable elements are renamed by Element::rename
         el.rename(guid)
 
         # Relocate workflows and actions
         if el.relocatable?
           el.relocate(category_name)
+
+          # Store old refs and new name
+          stale_refs[el.name] = guid
         end
       end
 
