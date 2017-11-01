@@ -119,7 +119,7 @@ module VRO
       @type = element_type
 
       unless relocatable?
-        print "Skipping element %s of type %s\n" % []
+        print "Skipping element %s of type %s\n" % [name, type]
         return
       end
 
